@@ -4,16 +4,6 @@ subtitle: "Performing Many Different Versions of an Analysis"
 editor: source
 ---
 
-This assignment will challenge your function writing abilities. I'm not going 
-to lie, these functions are difficult but well within your reach. I do, however,
-want to recognize that not everyone is interested in being a "virtuoso" with 
-their function writing. So, there are two options for this week's lab:
-
-- **Option 1:** Complete this lab assignment in search of virtuoso status with
-your function writing
-- **Option 2:** Complete one of the difficult functions (Exercise 1 or Exercise
-2) and complete the "Alternative Lab 6". 
-
 # Setting the Stage
 
 My number one use case for writing functions and iteration / looping is to
@@ -62,13 +52,39 @@ a threshold on the number of SDs away from the mean used to define outliers.
 ```{r}
 #| label: exercise-1
 
+library(tidyverse)
+
+remove_outliers <- function(df, ..., sd_thresh = 3) {
+  # Capture the variables to check
+  vars <- rlang::enquos(...)
+  
+  # Filter out non-numeric variables and keep track of which ones were removed
+  numeric_vars <- df |>
+    select(!!!vars) |>
+    select_if(is.numeric) |>
+    colnames()
+  
+  non_numeric_vars <- setdiff(names(select(df, !!!vars)), numeric_vars)
+  if (length(non_numeric_vars) > 0) {
+    warning(paste("The following variables are not numeric and were ignored:", 
+                paste(non_numeric_vars, collapse = ", ")))
+  }
+  
+  # For each numeric variable, calculate z-score and filter rows
+  df |>
+    mutate(across(all_of(numeric_vars), 
+                 ~ (. - mean(., na.rm = TRUE)) / sd(., na.rm = TRUE),
+                 .names = "{.col}_z")) |>
+    filter(if_all(ends_with("_z"), ~ abs(.) <= sd_thresh)) |>
+    select(-ends_with("_z"))  # Remove the z-score columns
+}
 ```
 
 ## Testing Your Function! 
 
 ```{r}
 #| label: exercise-1-test
-#| error: true
+#| error: false
 
 ## Testing how your function handles multiple input variables
 remove_outliers(diamonds, 
@@ -100,7 +116,27 @@ variables to impute values for, and a function to use when imputing.
 ```{r}
 #| label: exercise-2
 
-
+impute_missing <- function(df, ..., impute_fun = mean) {
+  # Capture the variables to impute
+  vars <- rlang::enquos(...)
+  
+  # Filter out non-numeric variables and keep track of which ones were removed
+  numeric_vars <- df |>
+    select(!!!vars) |>
+    select_if(is.numeric) |>
+    colnames()
+  
+  non_numeric_vars <- setdiff(names(select(df, !!!vars)), numeric_vars)
+  if (length(non_numeric_vars) > 0) {
+    warning(paste("The following variables are not numeric and were ignored:", 
+                paste(non_numeric_vars, collapse = ", ")))
+  }
+  
+  # For each numeric variable, impute missing values
+  df |>
+    mutate(across(all_of(numeric_vars), 
+                 ~ replace_na(., impute_fun(., na.rm = TRUE))))
+}
 ```
 
 ## Testing Your Function! 
@@ -141,7 +177,22 @@ model is fit.
 
 ```{r}
 #| label: exercise-3
-
+fit_model <- function(df, mod_formula, remove_outliers = FALSE, impute_missing = FALSE, ...) {
+  # Capture the variables to process
+  vars <- rlang::enquos(...)
+  
+  # Process the data based on the flags
+  if (remove_outliers) {
+    df <- remove_outliers(df, !!!vars)
+  }
+  
+  if (impute_missing) {
+    df <- impute_missing(df, !!!vars)
+  }
+  
+  # Fit the model
+  lm(mod_formula, data = df)
+}
 
 ```
 
@@ -203,7 +254,18 @@ combinations for our analyses.
 
 ```{r}
 #| label: exercise-4
+diamonds_arg_combos <- crossing(
+  mod_formula = c(
+    price ~ carat,
+    price ~ carat + cut,
+    price ~ carat + cut + clarity,
+    price ~ carat + cut + clarity + color
+  ),
+  impute_missing = c(TRUE, FALSE),
+  remove_outliers = c(TRUE, FALSE)
+)
 
+diamonds_arg_combos
 ```
 
 ## Iterating Over the Parameters
@@ -216,6 +278,24 @@ every combination of arguments from `diamonds.
 ```{r}
 #| label: exercise-5
 
+model_results <- diamonds_arg_combos |>
+  mutate(model = pmap(
+    list(
+      mod_formula = mod_formula,
+      impute_missing = impute_missing,
+      remove_outliers = remove_outliers
+    ),
+    function(mod_formula, impute_missing, remove_outliers) {
+      fit_model(
+        df = diamonds,
+        mod_formula = mod_formula,
+        remove_outliers = remove_outliers,
+        impute_missing = impute_missing,
+        price, carat
+      )
+    }
+  ))
 
+model_results
 ```
 
